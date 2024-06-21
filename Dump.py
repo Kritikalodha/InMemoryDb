@@ -1,6 +1,9 @@
 # Implement in memory DB with GET, SET and UPDATE OPERATION
 from typing import List
 import time
+from collections import Counter
+import pytz
+from datetime import datetime, timezone
 class InMemoryDB:
     def __init__(self, primary_key, columns):
         self.database = self.initialiseDB()
@@ -15,60 +18,77 @@ class InMemoryDB:
             return False
         return True
 
-    def setData(self, column_value) -> None:
-        if not column_value.get(self.primary_key, None):
-            raise Exception("Primary key not present")
-            return 
 
-        if self.database.get(column_value.get(self.primary_key, None), None):
-            raise Exception("Primary key already present")
-            return 
+    def setData(self, column_value, tz_name='UTC') -> bool:
         
-        for column in column_value.keys():
-            if not self.checkColumn(column):
-                raise Exception("Column not present")
-                return 
+        if not Counter([x for x in column_value.keys()]) == Counter(self.columns):
+            print("Column not present")
+            return False
 
+        if self.primary_key not in column_value:
+            print("Primary key not present")
+            return False
+
+        if column_value[self.primary_key] in self.database:
+            print("Primary key value already present")
+            return False
+        
         current_time = time.time()
 
         if "expiry_time" in self.columns:
-            column_value["expiry_time"] = column_value["expiry_time"] + current_time
+            current_time = datetime.now(pytz.timezone(tz_name)).astimezone(pytz.UTC)
+            expiration_time = current_time.timestamp() + column_value["expiry_time"]
+            column_value["expiry_time"] = expiration_time
 
         self.database[column_value[self.primary_key]] = column_value
-        return 
+        return True
 
 
-    def getData(self, column, value ) -> List :
+    def getData(self, column, value, timestamp=None, tz_name='UTC' ) -> List :
         # to get column from any column
         if not self.checkColumn(column):
-            raise Exception("Column not present")
-            return 
+            print("Column not present")
+            return []
+
+        if timestamp is not None:
+            user_time = datetime.fromtimestamp(timestamp, pytz.timezone(tz_name))
+            current_time = user_time.astimezone(pytz.UTC).timestamp()
+        else:
+            current_time = time.time()
 
         # if column is primary key
         if column == self.primary_key:
-            if self.database.get(value,{}).get("expiry_time", float('inf')) < time.time() :
+            if self.database.get(value,{}).get("expiry_time", float('inf')) < current_time :
                 return []
-            return [self.database.get(value, None)]
-             
+
+            if value in self.database:
+                return [self.database[value]]
+            else:
+                return []
 
         # if column is not primary key
         result  = []
         for key , di in self.database.items():
-            if di[column] == value and di.get("expiry_time", float('inf'))>time.time():
+            if di[column] == value and di.get("expiry_time", float('inf'))>current_time:
                 result.append(di)
 
         return result
 
-    def updateData(self, on_column, on_value, update_column, new_value) -> None:
+    def updateData(self, on_column, on_value, update_column_value) -> bool:
+        # If on_column not present in columns list
+        if not self.checkColumn(on_column) :
+            print("Either column not present")
+            return False
 
-        if not self.checkColumn(on_column) or  not self.checkColumn(update_column) :
-            raise Exception("Either column not present")
-            return 
+        # If update column keys not matches the schema of table
+        if not Counter([x for x in update_column_value.keys()]) == Counter(self.columns):
+            print("Column not present")
+            return False
 
         # if column is primary key
         if update_column == self.primary_key:
-            raise Exception("Should not update primary key")
-            return
+            print("Should not update primary key")
+            return False
 
         if update_column == "expiry_time":
             new_value = time.time()+new_value
@@ -77,33 +97,43 @@ class InMemoryDB:
         result  = []
         for key , di in self.database.items():
             if di[on_column]==on_value:
-                di[update_column] = new_value
-        return 
+                self.database[key] = update_column_value
+        return True
 
-    def getRowByPrefix(self, column_name, prefix):
+    def getRowByPrefix(self, column_name, prefix,timestamp=None, tz_name='UTC' ) -> list:
   
-        if not self.checkColumn(column_name):
-            raise Exception("Column not present")
-            return
+        if not self.checkColumn(column_name) :
+            print("Column not present")
+            return []
 
+        if timestamp is not None:
+            user_time = datetime.fromtimestamp(timestamp, pytz.timezone(tz_name))
+            current_time = user_time.astimezone(pytz.UTC).timestamp()
+        else:
+            current_time = time.time()
+        
         result  = []
         for key , di in self.database.items():
-            if di[column_name].startswith(prefix) and di.get("expiry_time", float('inf'))>time.time() :
+            if di[column_name].startswith(prefix) and di.get("expiry_time", float('inf'))>current_time :
                 result.append(di)
 
         return result
 
-
-
-    def getRowBySuffix(self, column_name, suffix):
+    def getRowBySuffix(self, column_name, suffix, timestamp=None, tz_name='UTC') -> list:
       
         if not self.checkColumn(column_name):
-            raise Exception("Column not present")
-            return 
+            print("Column not present")
+            return []
+
+        if timestamp is not None:
+            user_time = datetime.fromtimestamp(timestamp, pytz.timezone(tz_name))
+            current_time = user_time.astimezone(pytz.UTC).timestamp()
+        else:
+            current_time = time.time()
 
         result  = []
         for key , di in self.database.items():
-            if di[column_name].endswith(prefix) and di.get("expiry_time", float('inf'))>time.time():
+            if di[column_name].endswith(prefix) and di.get("expiry_time", float('inf'))>current_time:
                 result.append(di)
 
         return result
@@ -113,11 +143,11 @@ class InMemoryDB:
         print("DB is -> ", [ val for val in self.database.values() ])
         return 
 
-    def deleteRowBySuffix(self, column_name, suffix) -> None:
+    def deleteRowBySuffix(self, column_name, suffix) -> bool:
       
         if not self.checkColumn(column_name):
-            raise Exception("Column not present")
-            return 
+            print("Column not present")
+            return False
 
         delete_keys = []
         for key , di in self.database.items():
@@ -127,13 +157,13 @@ class InMemoryDB:
         for key in delete_keys:
             self.database.pop(key)
 
-        return 
+        return True
 
-    def deleteRowByPrefix(self, column_name, prefix) -> None:
+    def deleteRowByPrefix(self, column_name, prefix) -> bool:
   
         if not self.checkColumn(column_name):
-            raise Exception("Column not present")
-            return
+            print("Column not present")
+            return False
 
         delete_keys = []
         for key , di in self.database.items():
@@ -142,21 +172,20 @@ class InMemoryDB:
 
         for key in delete_keys:
             self.database.pop(key)
-        return 
+        return True
 
-    def deleteRow(self, column, value ) -> None :
+    def deleteRow(self, column, value ) -> bool :
         # to get column from any column
         if not self.checkColumn(column):
-            raise Exception("Column not present")
-            return 
+            print("Column not present")
+            return False
 
         # if column is primary key
         if column == self.primary_key:
             if value in self.database:
                 self.database.pop(value)
-                return 
+                return True
              
-
         # if column is not primary key
         delete_keys = []
         for key , di in self.database.items():
@@ -166,25 +195,31 @@ class InMemoryDB:
         for key in delete_keys:
             self.database.pop(key)
 
-        return  
+        return  True
 
-    def dumpDB(self) -> None:
-        current_time = time.time()
+    def dumpDB(self, tz_name='UTC') -> bool:
+        tz = pytz.timezone(tz_name)
+        # Get the current time in the specified time zone
+        current_time = datetime.now(tz).timestamp()
+
         for key , di in self.database.items():
+            
             if di.get("expiry_time", None):
-                time_left =  di.get("expiry_time") - current_time 
+                time_left =  di["expiry_time"] - current_time 
                 di["time_left"] = time_left
 
-        return 
+        return True
 
-    def retrieveDB(self) -> None:
-        current_time = time.time()
+    def retrieveDB(self, tz_name='UTC') -> bool:
+        tz = pytz.timezone(tz_name)
+        # Get the current time in the specified time zone
+        current_time = datetime.now(tz).timestamp()
         for key , di in self.database.items():
             if "time_left" in di:
                 di["expiry_time"] = current_time + di["time_left"]
                 di.pop("time_left")
 
-        return 
+        return True
 
 
         
@@ -196,7 +231,7 @@ if __name__=="__main__":
         db_obj.setData({"name":"neha", "age":30, "subject":"hindi", "height":"5.5", "expiry_time":200 })
         db_obj.showDataBase()
         time.sleep(2)
-        print(db_obj.getData("name","kritika"))
+        print(db_obj.getData("name","kritika", 1718998846))
         print(db_obj.getData("name","neha"))
         db_obj.dumpDB()
         time.sleep(10)
